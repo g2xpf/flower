@@ -1,4 +1,4 @@
-import React from "react";
+import { useEffect, useState } from "react";
 import "./App.css";
 
 import { styled, useTheme, Theme, CSSObject } from "@mui/material/styles";
@@ -18,9 +18,9 @@ import ListItem from "@mui/material/ListItem";
 import ListItemIcon from "@mui/material/ListItemIcon";
 import ListItemText from "@mui/material/ListItemText";
 import MapIcon from "@mui/icons-material/Map";
+import init from "./pkg";
 
 const drawerWidth = 200;
-const appBarHeightSpacing = 8;
 
 const AppBox = styled(Box)(({ theme }) => ({
   height: `calc(100% - ${theme.mixins.toolbar.minHeight}px - 1px)`,
@@ -110,7 +110,11 @@ const Drawer = styled(MuiDrawer, {
 
 export default function App() {
   const theme = useTheme();
-  const [open, setOpen] = React.useState(false);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    init();
+  }, []);
 
   const handleDrawerOpen = () => {
     setOpen(true);

@@ -3,11 +3,11 @@ import { useFlowerEditor } from "../lib/flowerEditor";
 import { Grid, Typography, Button } from "@mui/material";
 import { styled } from "@mui/material/styles";
 
-const PathTypography = styled("div")(({ theme }) => ({
+const PathTypography = styled("div")({
   overflow: "scroll",
   whiteSpace: "nowrap",
   width: 400,
-}));
+});
 
 export default function FlowerEditor() {
   const { width, height, ref: canvasParentRef } = useResizeDetector();

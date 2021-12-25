@@ -7,6 +7,8 @@ import {
   KeyboardEventHandler,
   KeyboardEvent,
 } from "react";
+import { Flow } from "../@types/api";
+import { json2flow, flow2json } from "../pkg";
 
 export type FlowerEditor = {
   saveFlow: () => Promise<void>;
@@ -17,7 +19,6 @@ export type FlowerEditor = {
   ref: RefObject<HTMLCanvasElement>;
 };
 
-export type Flow = {};
 export interface Size {
   width: number | undefined;
   height: number | undefined;
@@ -39,6 +40,17 @@ export function useFlowerEditor(size: Size): FlowerEditor {
     requestAnimationFrame((_time: DOMHighResTimeStamp) => {
       const ctx = context.current;
       if (ctx) {
+        const {
+          resources,
+          states,
+          transitions,
+          overlays,
+          references,
+          intermediates,
+        } = flow;
+        for (const state of states) {
+          state;
+        }
         ctx.fillStyle = "#f392a3";
         ctx.fillRect(50, 50, 100, 100);
 
@@ -50,7 +62,13 @@ export function useFlowerEditor(size: Size): FlowerEditor {
   const saveFlow = useCallback(async () => {
     const flowPath = await window.electron.showSaveFlowDialog();
     if (!!flowPath && flow) {
-      await window.electron.saveFlow(flowPath, flow);
+      try {
+        const flowStr = json2flow(JSON.stringify(flow));
+        console.log({ flowStr });
+        await window.electron.writeFile(flowPath, flowStr);
+      } catch (e) {
+        console.warn({ e });
+      }
     }
   }, [flow]);
 
@@ -58,18 +76,26 @@ export function useFlowerEditor(size: Size): FlowerEditor {
     const loadFlowPath = await window.electron.showOpenFlowDialog();
     if (!!loadFlowPath) {
       setFlowPath(loadFlowPath);
-      const flow = await window.electron.openFlow(loadFlowPath);
-      console.log({ flow });
-      setFlow(flow);
-      draw(flow);
+      const flowStr = await window.electron.readFile(loadFlowPath);
+      console.log({ flowStr });
+      try {
+        const flow = JSON.parse(flow2json(flowStr));
+        console.log({ flow });
+        setFlow(flow);
+        draw(flow);
+      } catch (e) {
+        console.warn(e);
+      }
     }
   };
   const createFlow = async () => {
     const createFlowPath = await window.electron.showSaveFlowDialog();
     if (!!createFlowPath) {
-      await window.electron.createFlow(createFlowPath);
+      await window.electron.createFile(createFlowPath);
       setFlowPath(createFlowPath);
-      draw({});
+      if (flow) {
+        draw(flow);
+      }
     }
   };
   const handleKeyInput = (e: KeyboardEvent<HTMLCanvasElement>) => {};
@@ -91,7 +117,7 @@ export function useFlowerEditor(size: Size): FlowerEditor {
     if (flow) {
       draw(flow);
     }
-  }, [size]);
+  }, [flow, size]);
 
   return { flowPath, ref, saveFlow, loadFlow, handleKeyInput, createFlow };
 }

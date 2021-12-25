@@ -1,21 +1,13 @@
-use super::{Flow, Intermediate, Overlay, Reference, Resource, State, Transition};
+use super::{kw, Flow, Intermediate, Item, Overlay, Reference, Resource, State, Transition};
 use proc_macro2::Span;
+use std::fmt;
+use syn::Error;
 use syn::{
     bracketed,
     parse::{Parse, ParseStream},
     punctuated::Punctuated,
     Result, Token,
 };
-
-mod kw {
-    use syn::custom_keyword;
-    custom_keyword!(resource);
-    custom_keyword!(state);
-    custom_keyword!(intermediate);
-    custom_keyword!(reference);
-    custom_keyword!(transition);
-    custom_keyword!(overlay);
-}
 
 impl Parse for Resource {
     fn parse(input: ParseStream) -> Result<Self> {
@@ -39,7 +31,7 @@ impl Parse for Reference {
         let resource = input.parse()?;
         Ok(Reference {
             state,
-            lt_add_token,
+            sub_lt_token: lt_add_token,
             mut_token,
             resource,
         })
@@ -87,81 +79,74 @@ impl Parse for Overlay {
     }
 }
 
+impl<K, T, P> Parse for Item<K, T, P>
+where
+    K: Parse,
+    T: Parse,
+    P: Parse + Default,
+{
+    fn parse(input: ParseStream) -> Result<Self> {
+        let keyword = input.parse()?;
+        let colon_token = input.parse()?;
+        let content;
+        let bracket = bracketed!(content in input);
+        let mut punct = Punctuated::parse_terminated_with(&content, T::parse)?;
+        if !punct.empty_or_trailing() {
+            punct.push_punct(P::default());
+        }
+        Ok(Item {
+            keyword,
+            colon_token,
+            bracket,
+            punct,
+        })
+    }
+}
+
 impl Parse for Flow {
     fn parse(input: ParseStream) -> Result<Self> {
-        let mut resources = Punctuated::new();
-        let mut states = Punctuated::new();
-        let mut intermediates = Punctuated::new();
-        let mut references = Punctuated::new();
-        let mut transitions = Punctuated::new();
-        let mut overlays = Punctuated::new();
+        let mut resources = None;
+        let mut states = None;
+        let mut intermediates = None;
+        let mut references = None;
+        let mut transitions = None;
+        let mut overlays = None;
 
         while !input.is_empty() {
             let lookahead1 = input.lookahead1();
             if lookahead1.peek(kw::resource) {
-                let content;
-                let _ = input.parse::<kw::resource>()?;
-                let _ = input.parse::<Token![:]>()?;
-                let _ = bracketed!(content in input);
-                let mut rs = Punctuated::parse_terminated_with(&content, Resource::parse)?;
-                if !rs.empty_or_trailing() {
-                    rs.push_punct(Token![,](Span::call_site()));
-                }
-                resources.extend(rs.into_pairs());
+                resources = Some(input.parse()?);
             } else if lookahead1.peek(kw::state) {
-                let content;
-                let _ = input.parse::<kw::state>()?;
-                let _ = input.parse::<Token![:]>()?;
-                let _ = bracketed!(content in input);
-                let mut ss = Punctuated::parse_terminated_with(&content, State::parse)?;
-                if !ss.empty_or_trailing() {
-                    ss.push_punct(Token![,](Span::call_site()))
-                }
-                states.extend(ss.into_pairs());
+                states = Some(input.parse()?);
             } else if lookahead1.peek(kw::intermediate) {
-                let content;
-                let _ = input.parse::<kw::intermediate>()?;
-                let _ = input.parse::<Token![:]>()?;
-                let _ = bracketed!(content in input);
-                let mut is = Punctuated::parse_terminated_with(&content, Intermediate::parse)?;
-                if !is.empty_or_trailing() {
-                    is.push_punct(Token![,](Span::call_site()))
-                }
-                intermediates.extend(is.into_pairs());
+                intermediates = Some(input.parse()?);
             } else if lookahead1.peek(kw::reference) {
-                let content;
-                let _ = input.parse::<kw::reference>()?;
-                let _ = input.parse::<Token![:]>()?;
-                let _ = bracketed!(content in input);
-                let mut rs = Punctuated::parse_terminated_with(&content, Reference::parse)?;
-                if !rs.empty_or_trailing() {
-                    rs.push_punct(Token![,](Span::call_site()))
-                }
-                references.extend(rs.into_pairs());
+                references = Some(input.parse()?);
             } else if lookahead1.peek(kw::transition) {
-                let content;
-                let _ = input.parse::<kw::transition>()?;
-                let _ = input.parse::<Token![:]>()?;
-                let _ = bracketed!(content in input);
-                let mut ts = Punctuated::parse_terminated_with(&content, Transition::parse)?;
-                if !ts.empty_or_trailing() {
-                    ts.push_punct(Token![,](Span::call_site()))
-                }
-                transitions.extend(ts.into_pairs());
+                transitions = Some(input.parse()?);
             } else if lookahead1.peek(kw::overlay) {
-                let content;
-                let _ = input.parse::<kw::overlay>()?;
-                let _ = input.parse::<Token![:]>()?;
-                let _ = bracketed!(content in input);
-                let mut os = Punctuated::parse_terminated_with(&content, Overlay::parse)?;
-                if !os.empty_or_trailing() {
-                    os.push_punct(Token![,](Span::call_site()))
-                }
-                overlays.extend(os.into_pairs());
+                overlays = Some(input.parse()?);
             } else {
                 return Err(lookahead1.error());
             }
         }
+
+        fn item_not_given_error<K: FnOnce(Span) -> D, D: fmt::Debug>(keyword: K) -> Error {
+            Error::new(
+                Span::call_site(),
+                format!(
+                    "required item not given: `{:?}`",
+                    keyword(Span::call_site())
+                ),
+            )
+        }
+        let resources = resources.ok_or_else(|| item_not_given_error(kw::resource))?;
+        let states = states.ok_or_else(|| item_not_given_error(kw::state))?;
+        let references = references.ok_or_else(|| item_not_given_error(kw::reference))?;
+        let transitions = transitions.ok_or_else(|| item_not_given_error(kw::transition))?;
+        let overlays = overlays.ok_or_else(|| item_not_given_error(kw::overlay))?;
+        let intermediates = intermediates.ok_or_else(|| item_not_given_error(kw::intermediate))?;
+
         Ok(Flow {
             resources,
             states,

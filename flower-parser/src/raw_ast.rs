@@ -1,8 +1,12 @@
+use proc_macro2::LexError;
 use proc_macro2::Span;
+use proc_macro2::TokenStream;
 use quote::ToTokens;
+use std::str::FromStr;
 use syn::{
     parse2,
     punctuated::{Pair, Punctuated},
+    token::Bracket,
     Token,
 };
 
@@ -14,6 +18,7 @@ use std::result;
 #[derive(Debug)]
 pub enum Error {
     SynError(syn::Error),
+    LexError(LexError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -28,7 +33,7 @@ impl From<Resource> for RawResource {
 impl TryFrom<RawResource> for Resource {
     type Error = Error;
     fn try_from(rr: RawResource) -> Result<Self> {
-        let input = rr.0.into_token_stream();
+        let input = TokenStream::from_str(&rr.0).map_err(Error::LexError)?;
         let ty = parse2(input).map_err(Error::SynError)?;
         Ok(Resource(ty))
     }
@@ -45,7 +50,7 @@ impl From<State> for RawState {
 impl TryFrom<RawState> for State {
     type Error = Error;
     fn try_from(rs: RawState) -> Result<Self> {
-        let input = rs.0.into_token_stream();
+        let input = TokenStream::from_str(&rs.0).map_err(Error::LexError)?;
         let ty = parse2(input).map_err(Error::SynError)?;
         Ok(State(ty))
     }
@@ -83,7 +88,7 @@ impl TryFrom<RawReference> for Reference {
         Ok(Reference {
             state,
             resource,
-            lt_add_token,
+            sub_lt_token: lt_add_token,
             mut_token,
         })
     }
@@ -100,7 +105,7 @@ impl From<Intermediate> for RawIntermediate {
 impl TryFrom<RawIntermediate> for Intermediate {
     type Error = Error;
     fn try_from(ri: RawIntermediate) -> Result<Self> {
-        let input = ri.0.into_token_stream();
+        let input = TokenStream::from_str(&ri.0).map_err(Error::LexError)?;
         let ty = parse2(input).map_err(Error::SynError)?;
         Ok(Intermediate(ty))
     }
@@ -188,12 +193,12 @@ impl From<Flow> for RawFlow {
             transitions,
             overlays,
         } = flow;
-        let resources = resources.into_iter().map(|r| r.into()).collect();
-        let states = states.into_iter().map(|r| r.into()).collect();
-        let intermediates = intermediates.into_iter().map(|r| r.into()).collect();
-        let references = references.into_iter().map(|r| r.into()).collect();
-        let transitions = transitions.into_iter().map(|r| r.into()).collect();
-        let overlays = overlays.into_iter().map(|r| r.into()).collect();
+        let resources = resources.punct.into_iter().map(|r| r.into()).collect();
+        let states = states.punct.into_iter().map(|r| r.into()).collect();
+        let intermediates = intermediates.punct.into_iter().map(|r| r.into()).collect();
+        let references = references.punct.into_iter().map(|r| r.into()).collect();
+        let transitions = transitions.punct.into_iter().map(|r| r.into()).collect();
+        let overlays = overlays.punct.into_iter().map(|r| r.into()).collect();
         RawFlow {
             resources,
             states,
@@ -207,25 +212,33 @@ impl From<Flow> for RawFlow {
 impl TryFrom<RawFlow> for Flow {
     type Error = Error;
     fn try_from(rf: RawFlow) -> Result<Self> {
-        fn v2p<T, U>(v: Vec<T>) -> Result<Punctuated<U, Token![,]>>
+        fn v2i<K, T, U>(keyword: K, v: Vec<T>) -> Result<Item<K, U>>
         where
             U: TryFrom<T, Error = Error>,
         {
-            Ok(Punctuated::from_iter(
+            let colon_token = Default::default();
+            let bracket = Bracket::default();
+            let punct = Punctuated::from_iter(
                 v.into_iter()
                     .map(|t| t.try_into())
                     .collect::<Result<Vec<U>>>()?
                     .into_iter()
                     .map(|u| Pair::Punctuated(u, Token![,](Span::call_site()))),
-            ))
+            );
+            Ok(Item {
+                keyword,
+                colon_token,
+                bracket,
+                punct,
+            })
         }
 
-        let resources = v2p(rf.resources)?;
-        let states = v2p(rf.states)?;
-        let intermediates = v2p(rf.intermediates)?;
-        let references = v2p(rf.references)?;
-        let transitions = v2p(rf.transitions)?;
-        let overlays = v2p(rf.overlays)?;
+        let resources = v2i(kw::resource::default(), rf.resources)?;
+        let states = v2i(kw::state::default(), rf.states)?;
+        let intermediates = v2i(kw::intermediate::default(), rf.intermediates)?;
+        let references = v2i(kw::reference::default(), rf.references)?;
+        let transitions = v2i(kw::transition::default(), rf.transitions)?;
+        let overlays = v2i(kw::overlay::default(), rf.overlays)?;
 
         Ok(Flow {
             resources,
@@ -235,5 +248,62 @@ impl TryFrom<RawFlow> for Flow {
             transitions,
             overlays,
         })
+    }
+}
+
+#[cfg(test)]
+mod raw_ast_test {
+    use std::str::FromStr;
+
+    use crate::Transition;
+
+    use super::{Flow, Reference};
+    use proc_macro2::TokenStream;
+    use syn::parse2;
+
+    const FLOW_STR: &str = r#"resource: [A]
+state: [S, T]
+reference: [S -< A]
+transition: [S >- N -> T]
+overlay: [S ^ T]
+intermediate: [N]
+"#;
+    #[test]
+    fn raw_ast_from_str() {
+        let _ = env_logger::try_init();
+        let input = TokenStream::from_str(FLOW_STR).unwrap();
+        log::debug!("{}", input);
+        let flow: Flow = parse2(input).unwrap();
+        log::debug!("{:?}", flow);
+    }
+
+    const REF_STR: &str = r#"A -< B"#;
+    #[test]
+    fn reference_from_str() {
+        let _ = env_logger::try_init();
+        let input = TokenStream::from_str(REF_STR).unwrap();
+        log::debug!("{}", input);
+        let reference: Reference = parse2(input).unwrap();
+        log::debug!("{:?}", reference);
+    }
+
+    const TRANSITION_STR: &str = r#"A >--> B"#;
+    #[test]
+    fn transition_from_str() {
+        let _ = env_logger::try_init();
+        let input = TokenStream::from_str(TRANSITION_STR).unwrap();
+        log::debug!("{}", input);
+        let transition: Transition = parse2(input).unwrap();
+        log::debug!("{:?}", transition);
+    }
+
+    const TRANSITION_INTERMEDIATE_STR: &str = r#"A >- B -> C"#;
+    #[test]
+    fn transition_intermediate_from_str() {
+        let _ = env_logger::try_init();
+        let input = TokenStream::from_str(TRANSITION_INTERMEDIATE_STR).unwrap();
+        log::debug!("{}", input);
+        let transition: Transition = parse2(input).unwrap();
+        log::debug!("{:?}", transition);
     }
 }

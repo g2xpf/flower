@@ -27,7 +27,7 @@ export type APIKey = "electron";
 export type API = {
   showOpenFlowDialog: () => Promise<string | undefined>;
   showSaveFlowDialog: () => Promise<string | undefined>;
-  saveFlow: (path: string, flow: Flow) => Promise<void>;
-  openFlow: (path: string) => Promise<Flow>;
-  createFlow: (path: string) => Promise<void>;
+  writeFile: (path: string, content: string) => Promise<void>;
+  readFile: (path: string) => Promise<string>;
+  createFile: (path: string) => Promise<void>;
 };

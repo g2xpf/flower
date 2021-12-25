@@ -6,6 +6,7 @@ flow! {
     reference: []
     transition: []
     overlay: []
+    intermediate: []
 }
 
 fn main() {}
