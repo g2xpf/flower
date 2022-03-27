@@ -24,53 +24,88 @@ export interface Size {
   height: number | undefined;
 }
 
+const fillObject = <O extends {}>(
+  ctx: CanvasRenderingContext2D,
+  obj: O,
+  x: number,
+  y: number
+) => {
+  let linesStr: string;
+
+  const spacePerTab = 4;
+  const spaces = " ".repeat(spacePerTab);
+  const measure = ctx.measureText("");
+  const fontHeight =
+    measure.fontBoundingBoxAscent + measure.fontBoundingBoxDescent;
+
+  if (typeof obj === "string") {
+    linesStr = obj;
+  } else {
+    const s = JSON.stringify(obj, null, "\t");
+    linesStr = s;
+  }
+
+  const lines = linesStr.split("\n");
+  for (let i = 0, len = lines.length; i < len; ++i) {
+    let line = lines[i];
+    let numCount = 0;
+    while (line.startsWith("\t")) {
+      line = line.slice(1);
+      numCount++;
+    }
+    const tabSpace = spaces.repeat(numCount);
+    const height = y + i * fontHeight;
+
+    ctx.fillText(`${tabSpace}${line}`, x, height);
+  }
+};
+
 export function useFlowerEditor(size: Size): FlowerEditor {
-  const ref = useRef<HTMLCanvasElement>(null);
-  const context = useRef<CanvasRenderingContext2D | null>(null);
-  const [flow, setFlow] = useState<Flow | null>(null);
   const [flowPath, setFlowPath] = useState<string | null>(null);
 
-  const draw = (flow: Flow) => {
-    if (isRendering.current) {
-      console.log("skipped");
-      return;
-    }
-    console.log(flow);
-    isRendering.current = true;
-    requestAnimationFrame((_time: DOMHighResTimeStamp) => {
-      const ctx = context.current;
-      if (ctx) {
-        const {
-          resources,
-          states,
-          transitions,
-          overlays,
-          references,
-          intermediates,
-        } = flow;
-        for (const state of states) {
-          state;
-        }
-        ctx.fillStyle = "#f392a3";
-        ctx.fillRect(50, 50, 100, 100);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const contextRef = useRef<CanvasRenderingContext2D | null>(null);
+  const flowRef = useRef<Flow>();
+  const rawFlowStrRef = useRef<string>();
+  const frameRequestHandleRef = useRef<number>();
 
-        isRendering.current = false;
-      }
-    });
+  // draw flow
+  const draw = (timer: DOMHighResTimeStamp) => {
+    if (contextRef.current && flowRef.current) {
+      const ctx = contextRef.current;
+      const flow = Object.assign({}, flowRef.current);
+
+      const { width, height } = ctx.canvas;
+      ctx.clearRect(0, 0, width, height);
+      fillObject(ctx, flow, 0, 10);
+      rawFlowStrRef.current && fillObject(ctx, rawFlowStrRef.current, 200, 10);
+    }
+
+    frameRequestHandleRef.current = requestAnimationFrame(draw);
   };
 
-  const saveFlow = useCallback(async () => {
+  useEffect(() => {
+    frameRequestHandleRef.current = requestAnimationFrame(draw);
+
+    return () => {
+      if (frameRequestHandleRef.current) {
+        cancelAnimationFrame(frameRequestHandleRef.current);
+      }
+    };
+  }, []);
+
+  const saveFlow = async () => {
     const flowPath = await window.electron.showSaveFlowDialog();
-    if (!!flowPath && flow) {
+    if (!!flowPath && flowRef.current) {
       try {
-        const flowStr = json2flow(JSON.stringify(flow));
+        const flowStr = json2flow(JSON.stringify(flowRef.current));
         console.log({ flowStr });
         await window.electron.writeFile(flowPath, flowStr);
       } catch (e) {
         console.warn({ e });
       }
     }
-  }, [flow]);
+  };
 
   const loadFlow = async () => {
     const loadFlowPath = await window.electron.showOpenFlowDialog();
@@ -81,7 +116,9 @@ export function useFlowerEditor(size: Size): FlowerEditor {
       try {
         const flow = JSON.parse(flow2json(flowStr));
         console.log({ flow });
-        setFlow(flow);
+        flowRef.current = flow;
+        rawFlowStrRef.current = flowStr;
+
         draw(flow);
       } catch (e) {
         console.warn(e);
@@ -93,31 +130,37 @@ export function useFlowerEditor(size: Size): FlowerEditor {
     if (!!createFlowPath) {
       await window.electron.createFile(createFlowPath);
       setFlowPath(createFlowPath);
-      if (flow) {
-        draw(flow);
-      }
     }
   };
   const handleKeyInput = (e: KeyboardEvent<HTMLCanvasElement>) => {};
 
-  const isRendering = useRef(false);
-
   useEffect(() => {
-    const canvas = ref.current;
+    const canvas = canvasRef.current;
     if (!canvas) {
       return;
     }
     const ctx = canvas.getContext("2d");
     if (ctx && size.width && size.height) {
-      ctx.canvas.width = size.width;
-      ctx.canvas.height = size.height;
-    }
-    context.current = ctx;
+      const dpr = window.devicePixelRatio || 1;
+      const width = Math.floor(size.width);
+      const height = Math.floor(size.height);
 
-    if (flow) {
-      draw(flow);
+      ctx.fillStyle = "#f392a3";
+      canvas.style.width = `${width}px`;
+      canvas.style.height = `${height}px`;
+      canvas.width = width * dpr;
+      canvas.height = height * dpr;
+      ctx.scale(dpr, dpr);
     }
-  }, [flow, size]);
+    contextRef.current = ctx;
+  }, [size]);
 
-  return { flowPath, ref, saveFlow, loadFlow, handleKeyInput, createFlow };
+  return {
+    flowPath,
+    ref: canvasRef,
+    saveFlow,
+    loadFlow,
+    handleKeyInput,
+    createFlow,
+  };
 }

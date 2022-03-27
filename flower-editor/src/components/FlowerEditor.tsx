@@ -70,6 +70,7 @@ export default function FlowerEditor() {
       <Grid
         item
         xs
+        container
         sx={{ maxWidth: "100% !important", maxHeight: `${(100 / 12) * 11}%` }}
       >
         <div ref={canvasParentRef} style={{ width: "100%", height: "100%" }}>
